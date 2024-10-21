@@ -1,13 +1,22 @@
 require("dotenv").config();
 const express = require("express");
+const jwt = require("jsonwebtoken");
+const cookieParser = require('cookie-parser');
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: ["http://localhost:5173"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
+app.use(cookieParser());
 
 // MongoDB URI with environment variables
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.drohc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -20,6 +29,27 @@ const client = new MongoClient(uri, {
   },
 });
 
+// personal middleware
+const verifyToken = (req, res, next) => {
+  try {
+    const token = req.cookies.token;
+    if (!token) {
+      return res.status(401).send({ message: "No token provided" });
+    }
+
+    jwt.verify(token, process.env.ACCESS_SECRET_TOKEN, (err, decoded) => {
+      if (err) {
+        return res.status(403).send({ message: "Invalid token" });
+      }
+
+      req.user = decoded;
+      next();
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Token verification failed", error });
+  }
+};
+
 async function run() {
   try {
     // Connect to MongoDB
@@ -29,10 +59,79 @@ async function run() {
     const reviewsCollection = client.db("carsDb").collection("review");
     const teamCollection = client.db("carsDb").collection("team");
     const productCollection = client.db("carsDb").collection("products");
+    const bookingCollection = client.db("carsDb").collection("booking");
 
-    // Base route
+    // Auth route
+
+    app.post("/jwt", async (req, res) => {
+      try {
+        const user = req.body;
+        const token = jwt.sign(user, process.env.ACCESS_SECRET_TOKEN, {
+          expiresIn: "1h",
+        });
+
+        const cookieOptions = {
+          httpOnly: true,
+          secure: false,
+        };
+
+        res
+          .cookie("token", token, cookieOptions)
+          .status(200)
+          .send({ success: true, message: "JWT token issued" });
+      } catch (error) {
+        console.error("Error generating JWT:", error);
+        res
+          .status(500)
+          .send({ success: false, message: "Failed to issue JWT token" });
+      }
+    });
+
+    // services route
     app.get("/", (req, res) => {
       res.send("Welcome to Cars Haven");
+    });
+
+    app.get("/booking",verifyToken, async (req, res) => {
+      try {
+        const email = req.query?.email;
+        let query = {};
+
+        if (email) {
+          query = { email };
+        }
+    
+        const result = await bookingCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error("Error fetching bookings:", error);
+        res.status(500).send({
+          success: false,
+          message: "Failed to fetch bookings",
+          error: error.message,
+        });
+      }
+    });
+    
+
+    app.post("/booking", async (req, res) => {
+      const data = req.body;
+      try {
+        const result = await bookingCollection.insertOne(data);
+        res.status(201).send({ success: true, result });
+      } catch (error) {
+        console.error("Error inserting booking:", error);
+        res
+          .status(500)
+          .send({ success: false, message: "Failed to create booking" });
+      }
+    });
+
+    app.delete("/booking/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await bookingCollection.deleteOne(query);
+      res.send(result);
     });
 
     // Fetch reviews
@@ -53,7 +152,6 @@ async function run() {
           projection: { name: 1, image: 1, price: 1, rating: 1 },
         };
         const result = await productCollection.findOne(query, option);
-        console.log(result);
         res.send(result);
       } catch (error) {
         res.status(500).send({ message: "Error fetching reviews", error });
