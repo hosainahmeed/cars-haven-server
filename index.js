@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const jwt = require("jsonwebtoken");
-const cookieParser = require('cookie-parser');
+const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const app = express();
 const port = process.env.PORT || 5000;
@@ -56,16 +56,19 @@ async function run() {
     await client.connect();
 
     // Access collection
-    const reviewsCollection = client.db("carsDb").collection("review");
-    const teamCollection = client.db("carsDb").collection("team");
-    const productCollection = client.db("carsDb").collection("products");
     const bookingCollection = client.db("carsDb").collection("booking");
+    const productCollection = client.db("carsDb").collection("products");
+    const reviewsCollection = client.db("carsDb").collection("review");
+    const servicesCollection = client.db("carsDb").collection("services");
+    const teamCollection = client.db("carsDb").collection("team");
 
     // Auth route
 
     app.post("/jwt", async (req, res) => {
       try {
         const user = req.body;
+        console.log(user);
+
         const token = jwt.sign(user, process.env.ACCESS_SECRET_TOKEN, {
           expiresIn: "1h",
         });
@@ -91,16 +94,38 @@ async function run() {
     app.get("/", (req, res) => {
       res.send("Welcome to Cars Haven");
     });
+    app.get("/services", async (req, res) => {
+      const result = await servicesCollection.find().toArray();
+      res.send(result);
+    });
 
-    app.get("/booking",verifyToken, async (req, res) => {
+    app.get("/services/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const option = {
+          projection: { name: 1, image: 1, price: 1, rating: 1 },
+        };
+        const result = await servicesCollection.findOne(query, option);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching reviews", error });
+      }
+    });
+
+    app.get("/booking", async (req, res) => {
       try {
         const email = req.query?.email;
         let query = {};
 
+        if (req.query?.email !== email) {
+          return res.status(403).send({ message: "forbidden" });
+        }
+
         if (email) {
           query = { email };
         }
-    
+
         const result = await bookingCollection.find(query).toArray();
         res.send(result);
       } catch (error) {
@@ -112,7 +137,6 @@ async function run() {
         });
       }
     });
-    
 
     app.post("/booking", async (req, res) => {
       const data = req.body;
